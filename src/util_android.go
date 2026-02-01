@@ -4,7 +4,7 @@ package main
 
 /*
 #cgo CFLAGS: -DSDL_MAIN_HANDLED
-#cgo LDFLAGS: -lEGL -landroid -llog
+#cgo LDFLAGS: -lEGL -landroid -llog -ldl
 #include <EGL/egl.h>
 #include <jni.h>
 #include <android/log.h>
@@ -143,6 +143,9 @@ func eglGetProcAddress(name string) unsafe.Pointer {
 }
 
 func selectRenderer(cfgVal string) (Renderer, FontRenderer) {
+	if cfgVal == "Vulkan 1.3" {
+		return &Renderer_VK{}, &FontRenderer_VK{}
+	}
 	return &Renderer_GLES32{}, &FontRenderer_GLES32{}
 }
 

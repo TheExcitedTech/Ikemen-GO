@@ -61,12 +61,6 @@ func realMain() {
 	if runtime.GOOS == "android" {
 		Logcat("Inside realMain...")
 		runtime.LockOSThread()
-		sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_ES)
-		sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 3)
-		sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 2)
-		sdl.GLSetAttribute(sdl.GL_DOUBLEBUFFER, 1)
-		sdl.GLSetAttribute(sdl.GL_ALPHA_SIZE, 0)
-		sdl.GLSetAttribute(sdl.GL_DEPTH_SIZE, 24)
 		// sdl.SetHint("SDL_VIDEO_EXTERNAL_CONTEXT", "0")
 		// sdl.SetHint("SDL_HIDAPI_IGNORE_DEVICES", "1")
 		// sdl.SetHint("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
@@ -163,10 +157,6 @@ func realMain() {
 		Logcat("LOG: loadConfig failed: " + err.Error())
 		// For Android, let's see exactly what failed
 		panic(err)
-	}
-	// Force to OpenGL ES 3.2 for Android
-	if runtime.GOOS == "android" {
-		cfg.Video.RenderMode = "OpenGL ES 3.2"
 	}
 	sys.cfg = *cfg
 	// Logcat("LOG: Config Loaded. System Script: " + sys.cfg.Config.System)

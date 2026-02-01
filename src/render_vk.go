@@ -1,4 +1,4 @@
-//go:build !kinc && !android
+//go:build !kinc
 
 package main
 
@@ -4698,17 +4698,18 @@ func (r *Renderer_VK) Init() {
 	if err != nil {
 		panic(err)
 	}
-	wminfo, _ := sys.window.GetWMInfo()
 	var osWindowHandle uintptr
 
-	switch wminfo.Subsystem {
-	case sdl.SYSWM_COCOA:
-		osWindowHandle = uintptr(wminfo.GetCocoaInfo().Window)
-	case sdl.SYSWM_WINDOWS:
-		osWindowHandle = uintptr(wminfo.GetWindowsInfo().Window)
-	case sdl.SYSWM_X11:
-		x11WinID := wminfo.GetX11Info().Window
-		osWindowHandle = uintptr(x11WinID)
+	if wminfo, wmErr := sys.window.GetWMInfo(); wmErr == nil && wminfo != nil {
+		switch wminfo.Subsystem {
+		case sdl.SYSWM_COCOA:
+			osWindowHandle = uintptr(wminfo.GetCocoaInfo().Window)
+		case sdl.SYSWM_WINDOWS:
+			osWindowHandle = uintptr(wminfo.GetWindowsInfo().Window)
+		case sdl.SYSWM_X11:
+			x11WinID := wminfo.GetX11Info().Window
+			osWindowHandle = uintptr(x11WinID)
+		}
 	}
 	err = r.NewVulkanDevice(appInfo, osWindowHandle)
 	if err != nil {
