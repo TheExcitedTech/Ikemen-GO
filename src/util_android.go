@@ -4,12 +4,13 @@ package main
 
 /*
 #cgo CFLAGS: -DSDL_MAIN_HANDLED
-#cgo LDFLAGS: -lEGL -landroid -llog
+#cgo LDFLAGS: -lEGL -landroid -llog -ldl
 #include <EGL/egl.h>
 #include <jni.h>
 #include <android/log.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <dlfcn.h>
 #include "SDL.h"
 
 static const char* GetStringUTFChars_Wrapper(JNIEnv* env, jstring str) {
@@ -42,6 +43,7 @@ import (
 	"unsafe"
 
 	findfont "github.com/flopp/go-findfont"
+	"github.com/veandco/go-sdl2/sdl"
 )
 
 var (
@@ -142,7 +144,39 @@ func eglGetProcAddress(name string) unsafe.Pointer {
 	return unsafe.Pointer(C.eglGetProcAddress(cname))
 }
 
+// checkVulkanSupport checks if Vulkan is available on this Android device.
+// Returns true if Vulkan can be initialized, false otherwise.
+func checkVulkanSupport() bool {
+	// Try to load libvulkan.so dynamically
+	libvulkan := C.dlopen(C.CString("libvulkan.so"), C.RTLD_NOW|C.RTLD_LOCAL)
+	if libvulkan == nil {
+		Logcat("Vulkan: libvulkan.so not found, falling back to GLES")
+		return false
+	}
+	C.dlclose(libvulkan)
+
+	// Check if we can get the Vulkan proc address from SDL
+	procAddr := sdl.VulkanGetVkGetInstanceProcAddr()
+	if procAddr == nil {
+		Logcat("Vulkan: SDL_Vulkan_GetVkGetInstanceProcAddr failed, falling back to GLES")
+		return false
+	}
+
+	Logcat("Vulkan: Support detected, Vulkan renderer available")
+	return true
+}
+
 func selectRenderer(cfgVal string) (Renderer, FontRenderer) {
+	if cfgVal == "Vulkan 1.3" {
+		// Check if Vulkan is actually available on this device
+		if checkVulkanSupport() {
+			Logcat("Renderer: Using Vulkan 1.3")
+			return &Renderer_VK{}, &FontRenderer_VK{}
+		}
+		// Vulkan requested but not available - fall back to GLES
+		Logcat("Renderer: Vulkan 1.3 requested but not available, falling back to OpenGL ES 3.2")
+	}
+	Logcat("Renderer: Using OpenGL ES 3.2")
 	return &Renderer_GLES32{}, &FontRenderer_GLES32{}
 }
 

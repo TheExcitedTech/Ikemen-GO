@@ -153,6 +153,8 @@ ensure_go_env() {
 # Dependency preflight (prints actionable commands)
 check_deps() {
 	local missing=()
+	local want_android=0
+	[[ "$(tolower "${targetOS:-}")" == "android" ]] && want_android=1
 	need() { command -v "$1" >/dev/null 2>&1 || missing+=("$1"); }
 
 	case "$OSTYPE" in
@@ -187,12 +189,23 @@ check_deps() {
 			need clang++
 			need nasm
 			need go
+			if [[ "$want_android" == "1" ]]; then
+				need cmake
+				need ninja
+				need unzip
+				need zip
+				need java
+			fi
 			# yasm not strictly required when using NASM, but list it if missing for parity
 			command -v yasm >/dev/null 2>&1 || echo "Note: yasm not found (nasm present). If build fails, try: brew install yasm" >&2
 			if ((${#missing[@]})); then
 				echo "ERROR: Missing tools: ${missing[*]}" >&2
 				echo "Install with Homebrew:" >&2
-				echo "  brew update && brew install git go pkg-config nasm libxmp sdl2 molten-vk" >&2
+				if [[ "$want_android" == "1" ]]; then
+					echo "  brew update && brew install git go pkg-config nasm cmake ninja openjdk zip unzip" >&2
+				else
+					echo "  brew update && brew install git go pkg-config nasm libxmp sdl2 molten-vk" >&2
+				fi
 				exit 1
 			fi
 		;;
@@ -205,10 +218,21 @@ check_deps() {
 			need nasm
 			need yasm
 			need go
+			if [[ "$want_android" == "1" ]]; then
+				need cmake
+				need ninja
+				need unzip
+				need zip
+				need java
+			fi
 			if ((${#missing[@]})); then
 				echo "ERROR: Missing tools: ${missing[*]}" >&2
 				echo "Install (Debian/Ubuntu):" >&2
-				echo "  sudo apt update && sudo apt install -y golang-go git pkg-config make nasm yasm build-essential libxmp-dev libsdl2-dev" >&2
+				if [[ "$want_android" == "1" ]]; then
+					echo "  sudo apt update && sudo apt install -y golang-go git pkg-config make nasm yasm build-essential cmake ninja-build zip unzip openjdk-17-jdk-headless" >&2
+				else
+					echo "  sudo apt update && sudo apt install -y golang-go git pkg-config make nasm yasm build-essential libxmp-dev libsdl2-dev" >&2
+				fi
 				exit 1
 			fi
 		;;
@@ -374,7 +398,7 @@ function main() {
 		;;
 		*)
 			echo "Unknown target: ${targetOS}"
-			echo "Valid targets: Win64 Win32 MacOS MacOSARM Linux LinuxARM"
+			echo "Valid targets: Win64 Win32 MacOS MacOSARM Linux LinuxARM Android"
 			exit 1
 		;;
 	esac
@@ -442,17 +466,75 @@ function varLinuxARM() {
 	export GOARCH=arm64
 	binName="Ikemen_GO_LinuxARM"
 }
+
+detect_android_ndk_host_tag() {
+	local prebuilt_root="${ANDROID_NDK_HOME:-}/toolchains/llvm/prebuilt"
+	local uname_s uname_m
+	local candidates=()
+	uname_s="$(uname -s 2>/dev/null || echo unknown)"
+	uname_m="$(uname -m 2>/dev/null || echo unknown)"
+
+	case "$uname_s" in
+		Darwin)
+			case "$uname_m" in
+				arm64|aarch64) candidates=(darwin-arm64 darwin-x86_64) ;;
+				*)             candidates=(darwin-x86_64 darwin-arm64) ;;
+			esac
+		;;
+		Linux)
+			case "$uname_m" in
+				x86_64|amd64)  candidates=(linux-x86_64) ;;
+				arm64|aarch64) candidates=(linux-aarch64 linux-x86_64) ;;
+				*)             candidates=(linux-x86_64) ;;
+			esac
+		;;
+		*)
+			candidates=(linux-x86_64 darwin-arm64 darwin-x86_64)
+		;;
+	esac
+
+	local tag
+	for tag in "${candidates[@]}"; do
+		if [[ -d "$prebuilt_root/$tag" ]]; then
+			printf '%s' "$tag"
+			return 0
+		fi
+	done
+	return 1
+}
+
 function varAndroid() {
-	local host_os="linux" # default to Linux as that's what the runner will be using
-	[[ "$OSTYPE" == "darwin"* ]] && host_os="darwin"
+	if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
+		echo "ERROR: ANDROID_NDK_HOME is not set." >&2
+		echo "       On macOS this is usually: \$HOME/Library/Android/sdk/ndk/<version>" >&2
+		exit 1
+	fi
+	if [[ ! -d "$ANDROID_NDK_HOME" ]]; then
+		echo "ERROR: ANDROID_NDK_HOME does not exist: $ANDROID_NDK_HOME" >&2
+		exit 1
+	fi
+
+	local host_tag
+	host_tag="$(detect_android_ndk_host_tag || true)"
+	if [[ -z "$host_tag" ]]; then
+		echo "ERROR: Could not find a compatible NDK LLVM prebuilt toolchain under:" >&2
+		echo "  $ANDROID_NDK_HOME/toolchains/llvm/prebuilt" >&2
+		echo "Expected one of: darwin-arm64, darwin-x86_64, linux-x86_64" >&2
+		exit 1
+	fi
+
 	export GOOS=android
 	export GOARCH=arm64
 	export CGO_ENABLED=1
 	# ANDROID_NDK_HOME is an environment variable as its path can be different per platform.
-	export TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/${host_os}-x86_64"
+	export TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/${host_tag}"
 	export TARGET="aarch64-linux-android34" # for Android 14
 	export CC="$TOOLCHAIN/bin/${TARGET}-clang"
 	export CXX="$TOOLCHAIN/bin/${TARGET}-clang++"
+	if [[ ! -x "$CC" ]]; then
+		echo "ERROR: Android clang was not found/executable: $CC" >&2
+		exit 1
+	fi
 	export ANDROID_DEPS_PATH="$REPO_ROOT/build/android-deps"
 	# Force pkg-config to ONLY look at the Android libraries
 	export PKG_CONFIG_LIBDIR="$ANDROID_DEPS_PATH/lib/pkgconfig"
@@ -747,6 +829,150 @@ function patch_go_sdl2_android() {
 	fi
 }
 
+function patch_eiton_vulkan_android() {
+	[[ "$GOOS" != "android" ]] && return 0
+
+	# github.com/Eiton/vulkan currently injects Apple-style "-arch ..." flags on Android.
+	# NDK clang already has the target triplet in the compiler name, so these flags fail.
+	# Also patch a bad vk_wrapper_android.c procaddr lookup that fails to compile on Android.
+	local f=""
+	local w=""
+
+	# 1) Prefer vendored copy (writable, deterministic)
+	local vendorf1="$REPO_ROOT/vendor/github.com/Eiton/vulkan/vulkan_android.go"
+	local vendorf2="$REPO_ROOT/vendor/github.com/eiton/vulkan/vulkan_android.go"
+	if [[ -f "$vendorf1" ]]; then
+		f="$vendorf1"
+	elif [[ -f "$vendorf2" ]]; then
+		f="$vendorf2"
+	else
+		# 2) Fallback to module cache
+		local modver modcache moddir
+		modver="$(go list -m -f '{{.Version}}' github.com/Eiton/vulkan 2>/dev/null || true)"
+		[[ -z "$modver" ]] && return 0
+
+		modcache="$(go env GOMODCACHE 2>/dev/null || true)"
+		[[ -z "$modcache" ]] && return 0
+
+		moddir="$modcache/github.com/!eiton/vulkan@${modver}"
+		f="$moddir/vulkan_android.go"
+
+		# If module isn't downloaded yet, fetch it once and retry locating the file.
+		if [[ ! -f "$f" ]]; then
+			go mod download github.com/Eiton/vulkan >/dev/null 2>&1 || true
+		fi
+		[[ -f "$f" ]] || return 0
+	fi
+
+	[[ -f "$f" ]] || return 0
+	w="$(dirname "$f")/vk_wrapper_android.c"
+
+	local need_arch_patch=0
+	local need_wrapper_patch=0
+	if grep -q -- "-arch[[:space:]]\\+amd64\\|-arch[[:space:]]\\+arm64\\|-arch[[:space:]]\\+x86_64" "$f"; then
+		need_arch_patch=1
+	fi
+	if [[ -f "$w" ]] && grep -Eq 'getInstanceProcAddress\)\(instance, "vkCmd(PushDescriptorSetKHR|BeginRendering|EndRendering)"\)' "$w"; then
+		need_wrapper_patch=1
+	fi
+
+	[[ "$need_arch_patch" == "0" && "$need_wrapper_patch" == "0" ]] && return 0
+
+	# sed -i needs write permission to the DIRECTORY (temp file) and the file itself.
+	local d; d="$(dirname "$f")"
+	if [[ ! -w "$d" ]]; then
+		chmod u+w "$d" 2>/dev/null || true
+	fi
+	if [[ ! -w "$d" ]]; then
+		echo "ERROR: Cannot patch github.com/Eiton/vulkan; directory is not writable:" >&2
+		echo "  $d" >&2
+		echo "If you want to use vendor/, run 'go mod vendor' and re-run the build." >&2
+		echo "Otherwise, fix module cache perms (or build via Docker ./build/build_android.sh)." >&2
+		exit 1
+	fi
+
+	if [[ "$need_arch_patch" == "1" ]]; then
+		echo "==> Patching github.com/Eiton/vulkan Android CFLAGS (-arch ... -> removed)..."
+		chmod u+w "$f" 2>/dev/null || true
+		# Remove unsupported Apple-style arch flags from Android cgo directives.
+		sed_inplace 's/[[:space:]]-arch[[:space:]]amd64//g' "$f"
+		sed_inplace 's/[[:space:]]-arch[[:space:]]arm64//g' "$f"
+		sed_inplace 's/[[:space:]]-arch[[:space:]]x86_64//g' "$f"
+
+		# Hard-stop early if patch didn't apply, so users get a clear error before go build.
+		if grep -n -- "-arch[[:space:]]\\+amd64\\|-arch[[:space:]]\\+arm64\\|-arch[[:space:]]\\+x86_64" "$f" >/dev/null 2>&1; then
+			echo "ERROR: Failed to patch github.com/Eiton/vulkan; unsupported -arch flags remain in:" >&2
+			echo "  $f" >&2
+			echo "Try clearing module cache for this module and rebuild:" >&2
+			echo "  rm -rf \"$(go env GOMODCACHE)/github.com/!eiton/vulkan@*\"" >&2
+			exit 1
+		fi
+	fi
+
+	if [[ "$need_wrapper_patch" == "1" ]]; then
+		echo "==> Patching github.com/Eiton/vulkan Android wrapper procaddr lookup..."
+		chmod u+w "$w" 2>/dev/null || true
+
+		# Fix broken Android wrapper code that references undeclared symbols.
+		# Step 1: Delete the broken lines from vkInit() that use undeclared getInstanceProcAddress/instance
+		sed_inplace '/getInstanceProcAddress)(instance, "vkCmdPushDescriptorSetKHR"/d' "$w"
+		sed_inplace '/getInstanceProcAddress)(instance, "vkCmdBeginRendering"/d' "$w"
+		sed_inplace '/getInstanceProcAddress)(instance, "vkCmdEndRendering"/d' "$w"
+
+		# Step 2: Replace the empty vkInitInstance function with one that loads the extension procs.
+		# Use a more robust pattern that handles various whitespace/formatting.
+		# First, check if the function just returns 0 (empty implementation)
+		if grep -q 'int vkInitInstance(VkInstance instance).*return 0' "$w" || \
+		   grep -A2 'int vkInitInstance(VkInstance instance)' "$w" | grep -q 'return 0'; then
+			# Create a temporary file with the fixed function
+			local tmpfile; tmpfile="$(mktemp)"
+			cat > "$tmpfile" << 'VKINITINSTANCE_EOF'
+int vkInitInstance(VkInstance instance) {
+    if (!vgo_vkGetInstanceProcAddr) {
+        return -1;
+    }
+    vgo_vkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)((*vgo_vkGetInstanceProcAddr)(instance, "vkCmdPushDescriptorSetKHR"));
+    vgo_vkCmdBeginRendering = (PFN_vkCmdBeginRendering)((*vgo_vkGetInstanceProcAddr)(instance, "vkCmdBeginRendering"));
+    vgo_vkCmdEndRendering = (PFN_vkCmdEndRendering)((*vgo_vkGetInstanceProcAddr)(instance, "vkCmdEndRendering"));
+    return 0;
+}
+VKINITINSTANCE_EOF
+			# Use awk to replace the function (handles multi-line better than sed)
+			awk '
+				/int vkInitInstance\(VkInstance instance\)/ {
+					# Skip until we find the closing brace
+					while (!/^}/ && !/return 0;[[:space:]]*}/) {
+						if (!getline) break
+					}
+					# If this line has the closing brace, skip it too
+					if (/}/) getline
+					# Now print our replacement
+					while ((getline line < "'"$tmpfile"'") > 0) print line
+					close("'"$tmpfile"'")
+					next
+				}
+				{ print }
+			' "$w" > "${w}.tmp" && mv "${w}.tmp" "$w"
+			rm -f "$tmpfile"
+		fi
+
+		# Verify the patches were successful
+		if grep -Eq 'getInstanceProcAddress\)\(instance, "vkCmd(PushDescriptorSetKHR|BeginRendering|EndRendering)"\)' "$w"; then
+			echo "ERROR: Failed to patch github.com/Eiton/vulkan Android wrapper; undeclared procaddr refs remain in:" >&2
+			echo "  $w" >&2
+			echo "Try clearing module cache for this module and rebuild:" >&2
+			echo "  rm -rf \"$(go env GOMODCACHE)/github.com/!eiton/vulkan@*\"" >&2
+			exit 1
+		fi
+		if ! grep -Fq '(*vgo_vkGetInstanceProcAddr)(instance, "vkCmdBeginRendering")' "$w"; then
+			echo "ERROR: Failed to patch github.com/Eiton/vulkan Android wrapper; vkInitInstance fix not detected in:" >&2
+			echo "  $w" >&2
+			exit 1
+		fi
+		echo "==> Vulkan Android wrapper patched successfully"
+	fi
+}
+
 function prepare_android_deps() {
 	[[ "$GOOS" != "android" ]] && return 0
 	build_sdl2_android
@@ -824,6 +1050,49 @@ function stage_android_apk_libs() {
 	cp -av "$REPO_ROOT/bin/libmain.so" "$abi_dir/"
 	# Deps (only .so, ignore Windows DLLs)
 	cp -av "$REPO_ROOT/lib/"*.so* "$abi_dir/" 2>/dev/null || true
+
+	# Bundle Vulkan validation layers for debug builds
+	if [[ "${DEBUG_BUILD:-0}" == "1" ]]; then
+		stage_vulkan_validation_layers "$abi_dir"
+	fi
+}
+
+# Download and stage Vulkan validation layers for debug APK builds
+function stage_vulkan_validation_layers() {
+	local abi_dir="$1"
+	local validation_layer_version="${VULKAN_VALIDATION_LAYER_VERSION:-1.3.275.0}"
+	local validation_layer_url="https://github.com/KhronosGroup/Vulkan-ValidationLayers/releases/download/v${validation_layer_version}/android-binaries-${validation_layer_version}.zip"
+	local validation_layer_cache="$BUILDDIR/vulkan-validation-layers"
+	local validation_layer_zip="$validation_layer_cache/android-binaries-${validation_layer_version}.zip"
+	local validation_layer_so="$validation_layer_cache/arm64-v8a/libVkLayer_khronos_validation.so"
+
+	# Check if we already have the validation layer
+	if [[ -f "$validation_layer_so" ]]; then
+		echo "==> Using cached Vulkan validation layer: $validation_layer_so"
+		cp -av "$validation_layer_so" "$abi_dir/"
+		return 0
+	fi
+
+	echo "==> Downloading Vulkan validation layers v${validation_layer_version}..."
+	mkdir -p "$validation_layer_cache"
+	
+	if ! download_file "$validation_layer_url" "$validation_layer_zip"; then
+		echo "WARNING: Failed to download Vulkan validation layers. Debug builds will not have validation." >&2
+		return 0
+	fi
+
+	echo "==> Extracting Vulkan validation layers..."
+	unzip -o "$validation_layer_zip" -d "$validation_layer_cache" || {
+		echo "WARNING: Failed to extract Vulkan validation layers." >&2
+		return 0
+	}
+
+	if [[ -f "$validation_layer_so" ]]; then
+		echo "==> Staging Vulkan validation layer: $validation_layer_so"
+		cp -av "$validation_layer_so" "$abi_dir/"
+	else
+		echo "WARNING: Vulkan validation layer not found after extraction: $validation_layer_so" >&2
+	fi
 }
 
 function stage_android_apk_assets() {
@@ -961,11 +1230,12 @@ function build() {
 		ensure_go_flags_android
 		prepare_android_deps
 		patch_go_sdl2_android
+		patch_eiton_vulkan_android
 		# MANUALLY define flags for Android to avoid pkg-config errors
 		export CGO_CFLAGS="-I$ANDROID_DEPS_PATH/include -I$ANDROID_DEPS_PATH/include/SDL2 ${CGO_CFLAGS:-}"
 		local deps_libs="-L$ANDROID_DEPS_PATH/lib -lSDL2 -lxmp -lavformat -lavcodec -lavutil -lswscale -lswresample -lavfilter"
-		# Link against Android system libraries (GLES, OpenSLES, log)
-		export CGO_LDFLAGS="${deps_libs} ${CGO_LDFLAGS:-} -lGLESv2 -lOpenSLES -llog -Wl,-z,max-page-size=16384"
+		# Link against Android system libraries (GLES, OpenSLES, log, dl for Vulkan loader helpers)
+		export CGO_LDFLAGS="${deps_libs} ${CGO_LDFLAGS:-} -lGLESv2 -lOpenSLES -llog -ldl -Wl,-z,max-page-size=16384"
 	else
 		maybe_build_ffmpeg
 		export PKG_CONFIG="${PKG_CONFIG:-pkg-config}"

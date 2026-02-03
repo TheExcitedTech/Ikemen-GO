@@ -37,7 +37,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Go (match CI's ~1.20)
-RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz \
+RUN arch="$(dpkg --print-architecture)" \
+  && case "$arch" in \
+      amd64) go_arch="amd64" ;; \
+      arm64) go_arch="arm64" ;; \
+      *) echo "Unsupported container architecture: $arch" >&2; exit 1 ;; \
+     esac \
+  && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" -o /tmp/go.tgz \
   && rm -rf /usr/local/go \
   && tar -C /usr/local -xzf /tmp/go.tgz \
   && rm -f /tmp/go.tgz

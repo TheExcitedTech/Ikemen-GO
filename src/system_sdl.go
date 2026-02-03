@@ -25,14 +25,27 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 	var fullscreen bool
 
 	if runtime.GOOS == "android" {
-		// On Android, we MUST use 0,0 or SDL ignores it anyway,
-		// but flags are the critical part.
+		windowFlags := sdl.WINDOW_SHOWN | sdl.WINDOW_FULLSCREEN
+		if s.cfg.Video.RenderMode == "Vulkan 1.3" {
+			windowFlags |= sdl.WINDOW_VULKAN
+		} else {
+			// Android OpenGL mode always uses GLES 3.2.
+			sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_ES)
+			sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 3)
+			sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 2)
+			sdl.GLSetAttribute(sdl.GL_DOUBLEBUFFER, 1)
+			sdl.GLSetAttribute(sdl.GL_ALPHA_SIZE, 0)
+			sdl.GLSetAttribute(sdl.GL_DEPTH_SIZE, 24)
+			windowFlags |= sdl.WINDOW_OPENGL
+		}
+
+		// On Android, we MUST use 0,0 or SDL ignores it anyway.
 		window, err = sdl.CreateWindow(
 			s.cfg.Config.WindowTitle,
 			sdl.WINDOWPOS_UNDEFINED,
 			sdl.WINDOWPOS_UNDEFINED,
 			0, 0, // Android ignores these and uses screen size
-			sdl.WINDOW_SHOWN|sdl.WINDOW_OPENGL|sdl.WINDOW_FULLSCREEN,
+			windowFlags,
 		)
 
 		if err != nil {
@@ -139,6 +152,11 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 			if s.cfg.Video.WindowCentered {
 				window.SetPosition(x, y)
 			}
+		}
+
+		// 7. V-SYNC
+		if sys.cfg.Video.RenderMode != "Vulkan 1.3" && s.cfg.Video.VSync >= 0 {
+			sdl.GLSetSwapInterval(s.cfg.Video.VSync)
 		}
 	}
 

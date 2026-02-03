@@ -1,5 +1,8 @@
 services:
   android-build:
+    # The Android NDK in this image is x86_64-hosted; force amd64 by default
+    # (important on Apple Silicon hosts).
+    platform: "${DOCKER_PLATFORM:-linux/amd64}"
     build:
       context: .
       dockerfile: Dockerfile

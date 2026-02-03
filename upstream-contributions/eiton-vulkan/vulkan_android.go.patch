@@ -1,0 +1,11 @@
+--- a/vulkan_android.go
++++ b/vulkan_android.go
+@@ -3,7 +3,7 @@
+ 
+ package vulkan
+ 
+-// #cgo CFLAGS: -x objective-c -arch amd64 -arch arm64
++// #cgo CFLAGS: -x objective-c
+ // #cgo LDFLAGS: -ldl
+ // #include "vk_wrapper_android.h"
+ import "C"

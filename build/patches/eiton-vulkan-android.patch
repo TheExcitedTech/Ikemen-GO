@@ -1,0 +1,44 @@
+--- a/vulkan_android.go
++++ b/vulkan_android.go
+@@ -1,7 +1,7 @@
+ //go:build android
+ 
+ package vulkan
+ 
+-// #cgo CFLAGS: -x objective-c -arch amd64 -arch arm64
++// #cgo CFLAGS: -x objective-c
+ // #cgo LDFLAGS: -ldl
+ // #include "vk_wrapper_android.h"
+--- a/vk_wrapper_android.c
++++ b/vk_wrapper_android.c
+@@ -1,3 +1,4 @@
++// Patched by Ikemen-GO for Android Vulkan support
+ #include "vk_wrapper_android.h"
+ #include <dlfcn.h>
+ #include <stdlib.h>
+@@ -215,10 +216,6 @@ int vkInit(void) {
+     vgo_vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)(dlsym(libvulkan, "vkGetDeviceProcAddr"));
+     vgo_vkEnumerateInstanceLayerProperties = (PFN_vkEnumerateInstanceLayerProperties)(dlsym(libvulkan, "vkEnumerateInstanceLayerProperties"));
+     vgo_vkEnumerateDeviceLayerProperties = (PFN_vkEnumerateDeviceLayerProperties)(dlsym(libvulkan, "vkEnumerateDeviceLayerProperties"));
+-    // These lines reference undeclared 'getInstanceProcAddress' and 'instance' variables - removed
+-    // vgo_vkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)((*getInstanceProcAddress)(instance, "vkCmdPushDescriptorSetKHR"));
+-    // vgo_vkCmdBeginRendering = (PFN_vkCmdBeginRendering)((*getInstanceProcAddress)(instance, "vkCmdBeginRendering"));
+-    // vgo_vkCmdEndRendering = (PFN_vkCmdEndRendering)((*getInstanceProcAddress)(instance, "vkCmdEndRendering"));
+     return 0;
+ }
+ 
+@@ -226,6 +223,15 @@ void vkDeinit(void) {
+     dlclose(libvulkan);
+ }
+ 
+-int vkInitInstance(VkInstance instance) {
++int vkInitInstance(VkInstance instance) {
++    if (!vgo_vkGetInstanceProcAddr) {
++        return -1;
++    }
++    // Load extension function pointers that require a valid VkInstance
++    vgo_vkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)((*vgo_vkGetInstanceProcAddr)(instance, "vkCmdPushDescriptorSetKHR"));
++    vgo_vkCmdBeginRendering = (PFN_vkCmdBeginRendering)((*vgo_vkGetInstanceProcAddr)(instance, "vkCmdBeginRendering"));
++    vgo_vkCmdEndRendering = (PFN_vkCmdEndRendering)((*vgo_vkGetInstanceProcAddr)(instance, "vkCmdEndRendering"));
+     return 0;
+ }
