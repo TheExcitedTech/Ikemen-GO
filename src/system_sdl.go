@@ -218,11 +218,7 @@ func (w *Window) SetIcon(icon []image.Image) {
 }
 
 func (w *Window) SetSwapInterval(interval int) {
-	if sys.cfg.Video.RenderMode == "OpenGL 3.2" || sys.cfg.Video.RenderMode == "OpenGL 2.1" {
-		sdl.GLSetSwapInterval(interval)
-	} else {
-		gfx.SetVSync()
-	}
+	gfx.SetVSync(interval)
 }
 
 func (w *Window) GetSize() (int, int) {
@@ -296,7 +292,7 @@ func (w *Window) toggleFullscreen() {
 		w.Window.SetFullscreen(uint32(sdl.WINDOW_FULLSCREEN_DESKTOP))
 		sdl.ShowCursor(sdl.DISABLE)
 	}
-	if sys.cfg.Video.VSync != -1 && (sys.cfg.Video.RenderMode == "OpenGL 3.2" || sys.cfg.Video.RenderMode == "OpenGL 2.1") {
+	if sys.cfg.Video.VSync != -1 {
 		sdl.GLSetSwapInterval(sys.cfg.Video.VSync)
 	}
 	w.fullscreen = !w.fullscreen
