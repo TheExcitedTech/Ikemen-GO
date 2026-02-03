@@ -61,10 +61,15 @@ func realMain() {
 	if runtime.GOOS == "android" {
 		Logcat("Inside realMain...")
 		runtime.LockOSThread()
+
+		// Force landscape orientation for Android
+		// This MUST be set BEFORE SDL_Init to take effect
+		sdl.SetHint(sdl.HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight")
+
+		// Additional Android hints (uncomment as needed)
 		// sdl.SetHint("SDL_VIDEO_EXTERNAL_CONTEXT", "0")
 		// sdl.SetHint("SDL_HIDAPI_IGNORE_DEVICES", "1")
 		// sdl.SetHint("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
-		// sdl.SetHint(sdl.HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight")
 		// sdl.SetHint("SDL_ANDROID_TRAP_BACK_BUTTON", "1")
 		// sdl.SetHint("SDL_JOYSTICK_HIDAPI", "0")
 		// sdl.SetHint("SDL_ANDROID_SEPARATE_MOUSE_AND_TOUCH", "1")

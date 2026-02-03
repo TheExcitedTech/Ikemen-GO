@@ -1651,6 +1651,23 @@ func (r *Renderer_VK) CreateSwapchain() error {
 	width, height := sys.window.GetSize()
 	imageExtent.Width = uint32(width)
 	imageExtent.Height = uint32(height)
+
+	// On Android, the surface may report dimensions in native (portrait) orientation.
+	// Ensure we use landscape dimensions (width > height) for the swapchain.
+	if runtime.GOOS == "android" && imageExtent.Width < imageExtent.Height {
+		imageExtent.Width, imageExtent.Height = imageExtent.Height, imageExtent.Width
+	}
+
+	// Determine the pre-transform to use
+	preTransform := surfaceCapabilities.CurrentTransform
+	// On Android, we want identity transform - let the compositor handle rotation
+	// This avoids having to rotate all rendering operations
+	if runtime.GOOS == "android" {
+		if surfaceCapabilities.SupportedTransforms&vk.SurfaceTransformFlags(vk.SurfaceTransformIdentityBit) != 0 {
+			preTransform = vk.SurfaceTransformIdentityBit
+		}
+	}
+
 	queueFamily := []uint32{0}
 	swapchainCreateInfo := vk.SwapchainCreateInfo{
 		SType:           vk.StructureTypeSwapchainCreateInfo,
@@ -1660,7 +1677,7 @@ func (r *Renderer_VK) CreateSwapchain() error {
 		ImageColorSpace: formats[chosenFormat].ColorSpace,
 		ImageExtent:     imageExtent,
 		ImageUsage:      vk.ImageUsageFlags(vk.ImageUsageColorAttachmentBit | vk.ImageUsageTransferSrcBit),
-		PreTransform:    surfaceCapabilities.CurrentTransform,
+		PreTransform:    preTransform,
 
 		ImageArrayLayers:      1,
 		ImageSharingMode:      vk.SharingModeExclusive,
@@ -1691,7 +1708,7 @@ func (r *Renderer_VK) CreateSwapchain() error {
 		return err
 	}
 	r.swapchains[0].format = formats[chosenFormat].Format
-	r.swapchains[0].extent = surfaceCapabilities.CurrentExtent
+	r.swapchains[0].extent = imageExtent // Use the corrected extent, not surfaceCapabilities.CurrentExtent
 	//r.swapchains[0].extent.Deref()
 	// for i := range formats {
 	// 	formats[i].Free()

@@ -177,6 +177,7 @@ This builds the engine **and** produces a ready-to-install **APK** inside Docker
 ### Requirements
 
 * Docker (Docker Desktop on Windows/macOS, or Docker Engine on Linux)
+* On Apple Silicon hosts (M1/M2/M3), Docker Desktop x86/amd64 emulation enabled
 
 ### Build (from repo root)
 
@@ -187,13 +188,42 @@ This builds the engine **and** produces a ready-to-install **APK** inside Docker
 ```
 
 This script wraps the docker compose commands and runs the Android build inside the container.
+On Apple Silicon, it automatically uses `linux/amd64` for compatibility with the Android NDK host toolchain.
 
 ### Option B: run Docker Compose directly
 
 ```bash
-docker compose -f build/docker/android/docker-compose.yml build
-docker compose -f build/docker/android/docker-compose.yml run --rm android-build
+DOCKER_PLATFORM=linux/amd64 docker compose -f build/docker/android/docker-compose.yml build
+DOCKER_PLATFORM=linux/amd64 docker compose -f build/docker/android/docker-compose.yml run --rm android-build
 ```
+
+### Direct build from terminal (no Docker)
+
+You can also build Android directly on macOS/Linux if you have NDK/SDK installed.
+
+#### Required environment
+
+```bash
+export ANDROID_NDK_HOME="$HOME/Library/Android/sdk/ndk/<your-ndk-version>"
+export ANDROID_SDK_ROOT="$HOME/Library/Android/sdk"
+export ANDROID_HOME="$ANDROID_SDK_ROOT"
+```
+
+#### Build shared library + runtime deps only
+
+```bash
+BUILD_ANDROID_APK=0 ./build/build.sh Android
+```
+
+#### Build full APK
+
+```bash
+./build/build.sh Android
+```
+
+Notes:
+* On macOS Apple Silicon, `build.sh` auto-detects and uses `darwin-arm64` NDK toolchains when available (falls back to `darwin-x86_64` if needed).
+* If `ANDROID_SDK_ROOT` is unset, `BUILD_ANDROID_APK=0` still lets you build `bin/libmain.so` and dependencies.
 
 ### Outputs
 

@@ -1,0 +1,28 @@
+--- a/vk_wrapper_android.c
++++ b/vk_wrapper_android.c
+@@ -215,14 +215,21 @@ int vkInit(void) {
+     vgo_vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)(dlsym(libvulkan, "vkGetDeviceProcAddr"));
+     vgo_vkEnumerateInstanceLayerProperties = (PFN_vkEnumerateInstanceLayerProperties)(dlsym(libvulkan, "vkEnumerateInstanceLayerProperties"));
+     vgo_vkEnumerateDeviceLayerProperties = (PFN_vkEnumerateDeviceLayerProperties)(dlsym(libvulkan, "vkEnumerateDeviceLayerProperties"));
+-    vgo_vkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)((*getInstanceProcAddress)(instance, "vkCmdPushDescriptorSetKHR"));
+-    vgo_vkCmdBeginRendering = (PFN_vkCmdBeginRendering)((*getInstanceProcAddress)(instance, "vkCmdBeginRendering"));
+-    vgo_vkCmdEndRendering = (PFN_vkCmdEndRendering)((*getInstanceProcAddress)(instance, "vkCmdEndRendering"));
++    // Note: vkCmdPushDescriptorSetKHR, vkCmdBeginRendering, vkCmdEndRendering
++    // are loaded in vkInitInstance() where we have a valid VkInstance
+     return 0;
+ }
+ 
+ void vkDeinit(void) {
+     dlclose(libvulkan);
+ }
+ 
+ int vkInitInstance(VkInstance instance) {
++    if (!vgo_vkGetInstanceProcAddr) {
++        return -1;
++    }
++    // Load extension function pointers that require a valid VkInstance
++    vgo_vkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)((*vgo_vkGetInstanceProcAddr)(instance, "vkCmdPushDescriptorSetKHR"));
++    vgo_vkCmdBeginRendering = (PFN_vkCmdBeginRendering)((*vgo_vkGetInstanceProcAddr)(instance, "vkCmdBeginRendering"));
++    vgo_vkCmdEndRendering = (PFN_vkCmdEndRendering)((*vgo_vkGetInstanceProcAddr)(instance, "vkCmdEndRendering"));
+     return 0;
+ }

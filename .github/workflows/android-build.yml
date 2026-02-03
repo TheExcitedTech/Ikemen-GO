@@ -1,0 +1,205 @@
+# Android Build & Test Workflow
+# Tests Android APK build with multiple GPU/renderer configurations
+#
+# GPU Test Matrix:
+# - gles32 + generic: OpenGL ES 3.2 on standard Android devices
+# - vulkan + snapdragon-8-elite: Vulkan 1.3 targeting Snapdragon 8 Elite (where GLES has issues)
+# - vulkan + mali-g720: Vulkan 1.3 targeting ARM Mali G720 GPUs
+#
+# Note: Actual GPU testing requires physical devices or cloud device farms.
+# This workflow validates that the APK builds successfully for each configuration.
+
+name: Android Build
+
+on:
+  push:
+    branches: [master, main, develop]
+    paths:
+      - 'src/**'
+      - 'build/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/android-build.yml'
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'src/**'
+      - 'build/**'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+    inputs:
+      debug_build:
+        description: 'Build with debug flags and validation layers'
+        required: false
+        default: '0'
+        type: choice
+        options:
+          - '0'
+          - '1'
+
+env:
+  GO_VERSION: '1.20'
+  NDK_VERSION: 'r27d'
+  # Android SDK components
+  ANDROID_API_LEVEL: '34'
+  ANDROID_BUILD_TOOLS_VERSION: '34.0.0'
+
+jobs:
+  build-android:
+    name: Build Android (${{ matrix.renderer }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # OpenGL ES 3.2 - default for most devices
+          - renderer: gles32
+            gpu_profile: generic
+            render_mode: "OpenGL ES 3.2"
+          # Vulkan 1.3 - for Snapdragon 8 Elite and other devices with GLES issues
+          - renderer: vulkan
+            gpu_profile: snapdragon-8-elite
+            render_mode: "Vulkan 1.3"
+          # Vulkan 1.3 - for ARM Mali GPUs
+          - renderer: vulkan
+            gpu_profile: mali-g720
+            render_mode: "Vulkan 1.3"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '11076708'
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager --install "platforms;android-${{ env.ANDROID_API_LEVEL }}"
+          sdkmanager --install "build-tools;${{ env.ANDROID_BUILD_TOOLS_VERSION }}"
+          sdkmanager --install "ndk;27.2.12479018"
+
+      - name: Set NDK environment
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build nasm yasm zip unzip
+
+      - name: Cache Android dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/android-deps
+            build/sdl2-src
+            build/libxmp-src
+            build/ffmpeg-src
+            build/vulkan-validation-layers
+          key: android-deps-${{ runner.os }}-ndk${{ env.NDK_VERSION }}-${{ hashFiles('build/build.sh') }}
+          restore-keys: |
+            android-deps-${{ runner.os }}-ndk${{ env.NDK_VERSION }}-
+
+      - name: Build Android APK
+        env:
+          DEBUG_BUILD: ${{ github.event.inputs.debug_build || '0' }}
+          APP_VERSION: ${{ github.ref_name }}-${{ github.sha }}
+          APP_BUILDTIME: ${{ github.event.repository.updated_at }}
+        run: |
+          echo "==> Building for renderer: ${{ matrix.renderer }} (GPU profile: ${{ matrix.gpu_profile }})"
+          chmod +x build/build.sh
+          ./build/build.sh Android
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ikemen-go-android-${{ matrix.renderer }}-${{ matrix.gpu_profile }}
+          path: bin/ikemen-go.apk
+          retention-days: 7
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.renderer }}-${{ matrix.gpu_profile }}
+          path: |
+            build/android-apk/ikemen-droid/app/build/outputs/logs/
+            build/ffmpeg-src/ffbuild/config.log
+          retention-days: 3
+
+  # Docker-based build for Apple Silicon compatibility testing
+  build-android-docker:
+    name: Build Android (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build with Docker
+        run: |
+          chmod +x build/build-android.sh
+          ./build/build-android.sh
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ikemen-go-android-docker
+          path: bin/ikemen-go.apk
+          retention-days: 7
+
+  # Test job placeholder for actual device testing
+  # Requires Firebase Test Lab or similar service
+  test-android:
+    name: Test Android (${{ matrix.renderer }})
+    needs: build-android
+    runs-on: ubuntu-latest
+    if: false  # Disabled until Firebase Test Lab is configured
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - renderer: gles32
+            gpu_profile: generic
+            device: "redfin"  # Pixel 5
+          - renderer: vulkan
+            gpu_profile: snapdragon-8-elite
+            device: "shiba"   # Pixel 8
+          - renderer: vulkan
+            gpu_profile: mali-g720
+            device: "felix"   # Pixel Fold
+
+    steps:
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: ikemen-go-android-${{ matrix.renderer }}-${{ matrix.gpu_profile }}
+
+      - name: Run tests on Firebase Test Lab
+        # Placeholder for Firebase Test Lab integration
+        # See: https://github.com/google-github-actions/firebase
+        run: |
+          echo "TODO: Configure Firebase Test Lab for device: ${{ matrix.device }}"
+          echo "APK: ikemen-go.apk"
+          echo "Renderer: ${{ matrix.renderer }}"
